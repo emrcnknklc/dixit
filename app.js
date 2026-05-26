@@ -123,15 +123,15 @@
   }
 
   function normalizeGameState(state) {
-    const players = Array.isArray(state.players) ? state.players.map(normalizePlayer) : [];
     const playedCards = Array.isArray(state.playedCards) ? state.playedCards : [];
     const discardPile = Array.isArray(state.discardPile) ? state.discardPile : [];
+    const players = normalizePlayersForSavedState(Array.isArray(state.players) ? state.players : [], playedCards, discardPile);
     const usedDeckIds = new Set([
       ...players.flatMap((player) => Array.isArray(player.handCards) ? player.handCards : []),
       ...playedCards,
       ...discardPile
     ].map((card) => getBaseCardId(card)));
-    const deck = (Array.isArray(state.deck) ? state.deck : []).filter((card) => !usedDeckIds.has(getBaseCardId(card)));
+    const deck = removeBlockedCardsFromDeck(Array.isArray(state.deck) ? state.deck : [], usedDeckIds);
 
     return {
       players,
@@ -167,7 +167,7 @@
       name: draft.name.trim() || `${index + 1} Player`,
       color: draft.color || playerColors[index],
       score: 0,
-      handCards: dealCards(index + 1, settings.cardsPerPlayer, deck, false)
+      handCards: dealCards(index + 1, settings.cardsPerPlayer, deck, false, new Set())
     }));
 
     return {
@@ -195,6 +195,24 @@
       ...player,
       name: migratedName || `${player.id} Player`
     };
+  }
+
+  function normalizePlayersForSavedState(players, playedCards, discardPile) {
+    const discardIds = new Set(discardPile.map((card) => getBaseCardId(card)).filter(Boolean));
+    const playedIds = new Set(playedCards.map((card) => getBaseCardId(card)).filter(Boolean));
+    const seenHandIds = new Set();
+    return players.map((player) => {
+      const normalized = normalizePlayer(player);
+      const handCards = (Array.isArray(normalized.handCards) ? normalized.handCards : []).filter((card) => {
+        const cardId = getBaseCardId(card);
+        if (!cardId) return false;
+        if (discardIds.has(cardId)) return false;
+        if (seenHandIds.has(cardId) && !playedIds.has(cardId)) return false;
+        seenHandIds.add(cardId);
+        return true;
+      });
+      return { ...normalized, handCards };
+    });
   }
 
   function createDeck() {
@@ -230,8 +248,15 @@
     }));
   }
 
-  function dealCards(playerId, count, deck, isNew) {
-    const drawn = deck.splice(0, count);
+  function dealCards(playerId, count, deck, isNew, blockedIds = new Set()) {
+    const drawn = [];
+    while (drawn.length < count && deck.length) {
+      const card = deck.shift();
+      const cardId = getBaseCardId(card);
+      if (!cardId || blockedIds.has(cardId)) continue;
+      blockedIds.add(cardId);
+      drawn.push(card);
+    }
     return drawn.map((card) => ({
       ...card,
       ownerPlayerId: playerId,
@@ -376,6 +401,12 @@
   function voteForCard(cardId) {
     if (!gameState?.votingMode || !gameState.selectedVoterPlayerId) return;
     if (gameState.selectedVoterPlayerId === gameState.currentStorytellerPlayerId) return;
+    const votedCard = gameState.playedCards.find((card) => card.id === cardId);
+    if (!votedCard) return;
+    if (votedCard.ownerPlayerId === gameState.selectedVoterPlayerId) {
+      showToast("Kendi kartına oy veremezsin.");
+      return;
+    }
     gameState.votes = [
       ...gameState.votes.filter((vote) => vote.voterPlayerId !== gameState.selectedVoterPlayerId),
       { voterPlayerId: gameState.selectedVoterPlayerId, cardId }
@@ -404,7 +435,8 @@
     const storytellerCard = gameState.playedCards.find((card) => card.ownerPlayerId === storytellerId);
     if (!storytellerCard) return;
     const nonStorytellers = gameState.players.filter((player) => player.id !== storytellerId);
-    const correctVotes = gameState.votes.filter((vote) => vote.cardId === storytellerCard.id);
+    const validVotes = getValidScoringVotes();
+    const correctVotes = validVotes.filter((vote) => vote.cardId === storytellerCard.id);
     const allCorrect = correctVotes.length === nonStorytellers.length;
     const noneCorrect = correctVotes.length === 0;
     const deltas = Object.fromEntries(gameState.players.map((player) => [player.id, 0]));
@@ -418,13 +450,13 @@
       correctVotes.forEach((vote) => {
         deltas[vote.voterPlayerId] += 3;
       });
-      gameState.votes.forEach((vote) => {
-        const votedCard = gameState.playedCards.find((card) => card.id === vote.cardId);
-        if (votedCard && votedCard.ownerPlayerId !== storytellerId) {
-          deltas[votedCard.ownerPlayerId] += 1;
-        }
-      });
     }
+    validVotes.forEach((vote) => {
+      const votedCard = gameState.playedCards.find((card) => card.id === vote.cardId);
+      if (votedCard && votedCard.ownerPlayerId !== storytellerId) {
+        deltas[votedCard.ownerPlayerId] += 1;
+      }
+    });
 
     gameState.players = gameState.players.map((player) => ({
       ...player,
@@ -444,16 +476,29 @@
     render();
   }
 
+  function getValidScoringVotes() {
+    if (!gameState) return [];
+    const storytellerId = gameState.currentStorytellerPlayerId;
+    return gameState.votes.filter((vote) => {
+      if (vote.voterPlayerId === storytellerId) return false;
+      const votedCard = gameState.playedCards.find((card) => card.id === vote.cardId);
+      if (!votedCard) return false;
+      return votedCard.ownerPlayerId !== vote.voterPlayerId;
+    });
+  }
+
   function goToNextRound() {
     if (!gameState?.roundResolved) return;
     gameState.discardPile = [...gameState.discardPile, ...gameState.playedCards];
+    const blockedIds = getUnavailableCardIds(gameState);
+    gameState.deck = removeBlockedCardsFromDeck(gameState.deck, blockedIds);
     gameState.players = gameState.players.map((player) => {
       const activeHand = player.handCards
         .filter((card) => !card.isPlayed)
         .map((card) => ({ ...card, isSelected: false }));
       return {
         ...player,
-        handCards: [...activeHand, ...dealCards(player.id, Math.max(0, settings.cardsPerPlayer - activeHand.length), gameState.deck, true)]
+        handCards: [...activeHand, ...dealCards(player.id, Math.max(0, settings.cardsPerPlayer - activeHand.length), gameState.deck, true, blockedIds)]
       };
     });
     gameState.currentRound += 1;
@@ -626,6 +671,26 @@
       const image = String(card?.image || "");
       const id = String(card?.id || "");
       return image.startsWith("placeholder-") || id.startsWith("deck-") || /^p\d+-deck-/.test(id);
+    });
+  }
+
+  function getUnavailableCardIds(state) {
+    return new Set([
+      ...(Array.isArray(state.players)
+        ? state.players.flatMap((player) => Array.isArray(player.handCards) ? player.handCards : [])
+        : []),
+      ...(Array.isArray(state.playedCards) ? state.playedCards : []),
+      ...(Array.isArray(state.discardPile) ? state.discardPile : [])
+    ].map((card) => getBaseCardId(card)).filter(Boolean));
+  }
+
+  function removeBlockedCardsFromDeck(deck, blockedIds) {
+    const seen = new Set();
+    return (Array.isArray(deck) ? deck : []).filter((card) => {
+      const cardId = getBaseCardId(card);
+      if (!cardId || blockedIds.has(cardId) || seen.has(cardId)) return false;
+      seen.add(cardId);
+      return true;
     });
   }
 
@@ -1192,6 +1257,7 @@
         return;
       }
       gameState = saved;
+      saveGame();
       modal = gameState.isGameFinished ? { type: "gameFinished", winnerId: gameState.players.find((p) => p.score >= settings.maxScore)?.id } : null;
       centerCardsRevealed = false;
       navigate("game");
