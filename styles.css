@@ -850,6 +850,7 @@ button:disabled {
 }
 
 .selector-button {
+  position: relative;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -859,6 +860,25 @@ button:disabled {
   color: #152022;
   font-weight: 900;
   border: 3px solid transparent;
+}
+
+.selector-vote-check {
+  position: absolute;
+  right: -3px;
+  top: -9px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #ffd36a;
+  color: #17231f;
+  border: 2px solid rgba(255, 248, 223, 0.92);
+  font-size: 0.82rem;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
 .selector-button.active {

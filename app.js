@@ -805,6 +805,7 @@
                 <div class="player-selector" aria-label="Oyuncu seçici">
                 ${gameState.players.map((player) => `
                     <button class="selector-button ${getSelectorClass(player)}" data-action="select-player" data-player-id="${player.id}" ${isSelectorDisabled(player) ? "disabled" : ""}>
+                      ${hasPlayerVoted(player.id) ? `<span class="selector-vote-check" aria-hidden="true">✓</span>` : ""}
                       ${escapeHtml(getPlayerToken(player))}
                     </button>
                   `).join("")}
@@ -848,6 +849,14 @@
   function getSelectorClass(player) {
     const activeId = gameState.votingMode ? gameState.selectedVoterPlayerId : gameState.selectedPlayerId;
     return `${player.id === activeId ? "active" : ""} ${player.id === gameState.currentStorytellerPlayerId ? "storyteller" : ""}`;
+  }
+
+  function hasPlayerVoted(playerId) {
+    return Boolean(
+      gameState?.votingMode &&
+      playerId !== gameState.currentStorytellerPlayerId &&
+      gameState.votes.some((vote) => vote.voterPlayerId === playerId)
+    );
   }
 
   function isSelectorDisabled(player) {
