@@ -1,0 +1,25 @@
+{
+  "name": "EmreDxT",
+  "short_name": "EmreDxT",
+  "description": "Yerel tablet Dixit oyun yardımcısı",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#071114",
+  "theme_color": "#071114",
+  "icons": [
+    {
+      "src": "assets/icons/emredxt-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icons/emredxt-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

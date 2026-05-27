@@ -7,6 +7,9 @@
   const CARD_COUNT = 108;
   const CARD_FOLDER = "assets/cards";
   const CARD_BACK_IMAGE = `${CARD_FOLDER}/card-back.webp`;
+  const MIN_PLAYER_COUNT = 3;
+  const MAX_PLAYER_COUNT = 6;
+  const PLAYER_COUNT_OPTIONS = [3, 4, 5, 6];
 
   const defaultSettings = {
     playerCount: 4,
@@ -17,7 +20,7 @@
   };
 
   const colorOptions = ["#c84848", "#2f6f73", "#4f63a6", "#9b6a2f", "#d39b36", "#7b4fa3", "#2f8f5b"];
-  const playerColors = colorOptions.slice(0, 4);
+  const playerColors = colorOptions.slice(0, MAX_PLAYER_COUNT);
 
   const scorePositions = [
     { score: 0, x: 60.7, y: 70.1 },
@@ -67,14 +70,29 @@
   function loadSettings() {
     try {
       const saved = readStorage(SETTINGS_KEY);
-      return saved ? { ...defaultSettings, ...JSON.parse(saved) } : { ...defaultSettings };
+      return normalizeSettings(saved ? { ...defaultSettings, ...JSON.parse(saved) } : { ...defaultSettings });
     } catch {
-      return { ...defaultSettings };
+      return normalizeSettings({ ...defaultSettings });
     }
   }
 
   function saveSettings() {
+    settings = normalizeSettings(settings);
     writeStorage(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  function normalizeSettings(nextSettings) {
+    return {
+      ...defaultSettings,
+      ...nextSettings,
+      playerCount: clampPlayerCount(nextSettings.playerCount),
+      cardsPerPlayer: Number(nextSettings.cardsPerPlayer) || defaultSettings.cardsPerPlayer
+    };
+  }
+
+  function clampPlayerCount(value) {
+    const count = Number(value) || defaultSettings.playerCount;
+    return Math.min(MAX_PLAYER_COUNT, Math.max(MIN_PLAYER_COUNT, count));
   }
 
   function loadGame() {
@@ -136,13 +154,15 @@
     return {
       players,
       currentRound: Number(state.currentRound) || 1,
-      currentStorytellerPlayerId: Number(state.currentStorytellerPlayerId) || 1,
-      selectedPlayerId: state.selectedPlayerId == null ? null : Number(state.selectedPlayerId),
+      currentStorytellerPlayerId: players.some((player) => player.id === Number(state.currentStorytellerPlayerId))
+        ? Number(state.currentStorytellerPlayerId)
+        : players[0]?.id || 1,
+      selectedPlayerId: players.some((player) => player.id === Number(state.selectedPlayerId)) ? Number(state.selectedPlayerId) : null,
       spectatorMode: Boolean(state.spectatorMode),
       playedCards,
       deck,
       votingMode: Boolean(state.votingMode),
-      selectedVoterPlayerId: state.selectedVoterPlayerId == null ? null : Number(state.selectedVoterPlayerId),
+      selectedVoterPlayerId: players.some((player) => player.id === Number(state.selectedVoterPlayerId)) ? Number(state.selectedVoterPlayerId) : null,
       votes: Array.isArray(state.votes) ? state.votes : [],
       roundResolved: Boolean(state.roundResolved),
       roundScoreSummary: state.roundScoreSummary || null,
@@ -152,20 +172,33 @@
     };
   }
 
-  function createSetupDraft() {
-    return Array.from({ length: 4 }, (_, index) => ({
+  function createSetupDraft(playerCount = settings.playerCount, previousDraft = []) {
+    const count = clampPlayerCount(playerCount);
+    return Array.from({ length: count }, (_, index) => {
+      const previous = previousDraft.find((player) => player.id === index + 1);
+      return {
       id: index + 1,
-      name: "",
-      color: playerColors[index]
-    }));
+        name: previous?.name || "",
+        color: previous?.color || playerColors[index] || colorOptions[index % colorOptions.length]
+      };
+    });
+  }
+
+  function updateSetupPlayerCount(playerCount) {
+    settings.playerCount = clampPlayerCount(playerCount);
+    saveSettings();
+    setupDraft = createSetupDraft(settings.playerCount, setupDraft);
+    render();
   }
 
   function createNewGame(playersDraft) {
+    settings.playerCount = clampPlayerCount(playersDraft.length);
+    saveSettings();
     const deck = shuffleDeck(createDeck());
     const players = playersDraft.map((draft, index) => ({
       id: index + 1,
       name: draft.name.trim() || `${index + 1} Player`,
-      color: draft.color || playerColors[index],
+      color: draft.color || playerColors[index] || colorOptions[index % colorOptions.length],
       score: 0,
       handCards: dealCards(index + 1, settings.cardsPerPlayer, deck, false, new Set())
     }));
@@ -190,7 +223,7 @@
   }
 
   function normalizePlayer(player) {
-    const migratedName = String(player?.name || "").trim().replace(/^Player\s+([1-4])$/i, "$1 Player");
+    const migratedName = String(player?.name || "").trim().replace(/^Player\s+([1-6])$/i, "$1 Player");
     return {
       ...player,
       name: migratedName || `${player.id} Player`
@@ -283,6 +316,7 @@
 
   function toggleSpectatorMode(enabled) {
     if (!gameState) return;
+    if (gameState.roundResolved) return;
     gameState.spectatorMode = enabled;
     if (enabled) {
       gameState.selectedPlayerId = null;
@@ -360,6 +394,7 @@
 
   function toggleCenterCards() {
     if (!gameState?.playedCards.length) return;
+    if (gameState.roundResolved) return;
     const willOpen = !centerCardsRevealed;
     centerCardsRevealed = willOpen;
     if (!centerCardsRevealed) {
@@ -460,7 +495,7 @@
 
     gameState.players = gameState.players.map((player) => ({
       ...player,
-      score: clamp(player.score + deltas[player.id], 0, settings.maxScore)
+      score: Math.max(0, player.score + deltas[player.id])
     }));
     gameState.roundResolved = true;
     gameState.votingMode = false;
@@ -611,7 +646,7 @@
     if (!gameState) return;
     gameState.players = gameState.players.map((player) => {
       if (player.id !== playerId) return player;
-      const score = clamp(player.score + delta, 0, settings.maxScore);
+      const score = Math.max(0, player.score + delta);
       return { ...player, score };
     });
     saveGame();
@@ -621,7 +656,7 @@
 
   function setScore(playerId, scoreValue, shouldRender = true) {
     if (!gameState) return;
-    const score = clamp(scoreValue, 0, settings.maxScore);
+    const score = Math.max(0, scoreValue);
     gameState.players = gameState.players.map((player) =>
       player.id === playerId ? { ...player, score } : player
     );
@@ -651,10 +686,9 @@
 
   function checkWinner() {
     if (!gameState) return;
-    const winner = gameState.players.find((player) => player.score >= settings.maxScore);
-    if (!winner) return;
+    if (!gameState.players.some((player) => player.score >= settings.maxScore)) return;
     gameState.isGameFinished = true;
-    modal = { type: "gameFinished", winnerId: winner.id };
+    modal = { type: "gameFinished" };
     saveGame();
   }
 
@@ -708,10 +742,89 @@
     return baseId.replace("card-", "");
   }
 
-  function getPlayerToken(player) {
+  function getPlayerToken(player, tokenMap = null) {
+    const map = tokenMap || getPlayerTokenMap(gameState?.players || [player]);
+    return map.get(player?.id) || getFallbackToken(player);
+  }
+
+  function getPlayerTokenMap(players) {
+    const normalizedPlayers = (Array.isArray(players) ? players : []).map((player) => ({
+      ...player,
+      tokenName: normalizeTokenName(player)
+    }));
+    const tokenById = new Map();
+    const groups = new Map();
+
+    normalizedPlayers.forEach((player) => {
+      const first = getTokenChars(player.tokenName)[0] || String(player.id || "?");
+      if (!groups.has(first)) groups.set(first, []);
+      groups.get(first).push(player);
+    });
+
+    groups.forEach((group, first) => {
+      if (group.length === 1) {
+        tokenById.set(group[0].id, first.toLocaleUpperCase("tr-TR"));
+        return;
+      }
+      const secondGroups = new Map();
+      group.forEach((player) => {
+        const second = getTokenChars(player.tokenName)[1] || "";
+        if (!secondGroups.has(second)) secondGroups.set(second, []);
+        secondGroups.get(second).push(player);
+      });
+      const used = new Set();
+      secondGroups.forEach((secondGroup, second) => {
+        if (secondGroup.length === 1 && second) {
+          const token = formatToken(first, second);
+          used.add(token.toLocaleLowerCase("tr-TR"));
+          tokenById.set(secondGroup[0].id, token);
+          return;
+        }
+        secondGroup.forEach((player, index) => {
+          const token = index === 0
+            ? formatToken(first)
+            : buildDisambiguatedToken(player.tokenName, first, secondGroup[0].tokenName, used);
+          used.add(token.toLocaleLowerCase("tr-TR"));
+          tokenById.set(player.id, token);
+        });
+      });
+    });
+
+    return tokenById;
+  }
+
+  function buildDisambiguatedToken(name, first, referenceName, used) {
+    const chars = getTokenChars(name);
+    const referenceChars = new Set(getTokenChars(referenceName).map((char) => char.toLocaleLowerCase("tr-TR")));
+    for (let index = 1; index < chars.length; index += 1) {
+      const candidate = formatToken(first, chars[index]);
+      if (used.has(candidate.toLocaleLowerCase("tr-TR"))) continue;
+      if (!referenceChars.has(chars[index].toLocaleLowerCase("tr-TR"))) return candidate;
+    }
+    for (const char of chars.slice(1)) {
+      const candidate = formatToken(first, char);
+      if (!used.has(candidate.toLocaleLowerCase("tr-TR"))) return candidate;
+    }
+    return formatToken(first, String(used.size + 1));
+  }
+
+  function formatToken(first, second = "") {
+    const firstPart = String(first || "?").toLocaleUpperCase("tr-TR");
+    const secondPart = second ? String(second).toLocaleLowerCase("tr-TR") : "";
+    return `${firstPart}${secondPart}`;
+  }
+
+  function normalizeTokenName(player) {
     const fallbackName = `${player?.id || ""} Player`;
-    const name = String(player?.name || fallbackName).trim() || fallbackName;
-    return (Array.from(name)[0] || String(player?.id || "?")).toLocaleUpperCase("tr-TR");
+    return String(player?.name || fallbackName).trim() || fallbackName;
+  }
+
+  function getTokenChars(name) {
+    return Array.from(String(name || "").replace(/\s+/g, ""));
+  }
+
+  function getFallbackToken(player) {
+    return formatToken(getTokenChars(normalizeTokenName(player))[0] || String(player?.id || "?"));
   }
 
   function colorWithAlpha(color, alpha) {
@@ -760,18 +873,24 @@
   }
 
   function renderHome() {
+    const canContinue = hasSavedPlayableGame();
     return `
       <main class="screen home-screen">
         <section class="home-card home-menu">
           <div class="button-stack">
             <button class="btn home-btn primary" data-action="new-game">Yeni Oyun</button>
-            <button class="btn home-btn" data-action="continue-game">Devam Et</button>
+            <button class="btn home-btn" data-action="continue-game" ${canContinue ? "" : "disabled"}>Devam Et</button>
             <button class="btn home-btn" data-action="show-all-cards">Bütün Kartlar</button>
           </div>
           ${toastMessage ? `<div class="toast">${escapeHtml(toastMessage)}</div>` : ""}
         </section>
       </main>
     `;
+  }
+
+  function hasSavedPlayableGame() {
+    const saved = loadGame();
+    return Boolean(saved && !saved.legacyInvalid && saved.isGameStarted);
   }
 
   function renderCardGallery() {
@@ -803,6 +922,18 @@
     return `
       <main class="screen setup-screen">
         <section class="setup-panel">
+          <div class="player-count-panel">
+            <span class="player-count-label">Oyuncu sayısı</span>
+            <div class="player-count-selector" aria-label="Oyuncu sayısı seçimi">
+              ${PLAYER_COUNT_OPTIONS.map((count) => `
+                <button
+                  class="player-count-button ${setupDraft.length === count ? "active" : ""}"
+                  data-action="setup-player-count"
+                  data-count="${count}"
+                >${count}</button>
+              `).join("")}
+            </div>
+          </div>
           <div class="setup-grid">
             ${setupDraft.map(renderSetupPlayer).join("")}
           </div>
@@ -846,20 +977,22 @@
 
   function renderGame() {
     if (!gameState) return renderHome();
+    const tokenMap = getPlayerTokenMap(gameState.players);
     const selectedPlayer = getPlayer(gameState.selectedPlayerId);
     const selectedPlayableCard = selectedPlayer?.handCards.some((card) => card.isSelected && !card.isPlayed);
     const selectedPlayerHasPlayed = selectedPlayer &&
       gameState.playedCards.some((card) => card.ownerPlayerId === selectedPlayer.id);
     return `
-      <main class="screen game-screen">
+      <main class="screen game-screen ${gameState.roundResolved ? "round-resolved" : ""}">
         <section class="game-layout">
           <section class="map-board" aria-label="Ana oyun haritası">
+            <div class="deck-count" aria-label="Oyunda kalan kart sayısı">${gameState.deck.length}</div>
             ${selectedPlayer ? renderPlayerHand(selectedPlayer, "player-zone-4") : ""}
             ${selectedPlayer ? `<button class="hand-play-button btn small" data-action="play-card" ${!selectedPlayableCard || selectedPlayerHasPlayed || gameState.spectatorMode ? "disabled" : ""}>Kartı Oyna</button>` : ""}
             ${renderVotingDock()}
             ${renderShuffleButton()}
             ${gameState.roundScoreSummary ? renderRoundSummary() : ""}
-            <div class="played-slot">
+            <div class="played-slot played-count-${gameState.players.length}">
               ${renderPlayedCards()}
             </div>
           </section>
@@ -871,7 +1004,7 @@
                 ${gameState.players.map((player) => `
                     <button class="selector-button ${getSelectorClass(player)}" data-action="select-player" data-player-id="${player.id}" ${isSelectorDisabled(player) ? "disabled" : ""}>
                       ${hasPlayerVoted(player.id) ? `<span class="selector-vote-check" aria-hidden="true">✓</span>` : ""}
-                      ${escapeHtml(getPlayerToken(player))}
+                      ${escapeHtml(getPlayerToken(player, tokenMap))}
                     </button>
                   `).join("")}
                 </div>
@@ -885,7 +1018,7 @@
             </div>
             <div class="mode-control">
               <div class="mode-row">
-                <button class="btn mode-btn ${gameState.spectatorMode ? "active" : ""}" data-action="toggle-spectator-button">Game Mode</button>
+                <button class="btn mode-btn ${gameState.spectatorMode ? "active" : ""}" data-action="toggle-spectator-button" ${gameState.roundResolved ? "disabled" : ""}>Kilitle</button>
                 <button class="btn icon-control" data-action="open-player-edit" title="Düzenleme" aria-label="Düzenleme">⚙</button>
               </div>
               <div class="mode-row">
@@ -913,7 +1046,15 @@
 
   function getSelectorClass(player) {
     const activeId = gameState.votingMode ? gameState.selectedVoterPlayerId : gameState.selectedPlayerId;
-    return `${player.id === activeId ? "active" : ""} ${player.id === gameState.currentStorytellerPlayerId ? "storyteller" : ""}`;
+    return [
+      player.id === activeId ? "active" : "",
+      player.id === gameState.currentStorytellerPlayerId ? "storyteller" : "",
+      hasPlayerPlayedCard(player.id) ? "has-played-card" : ""
+    ].filter(Boolean).join(" ");
+  }
+
+  function hasPlayerPlayedCard(playerId) {
+    return Boolean(gameState?.playedCards.some((card) => card.ownerPlayerId === playerId));
   }
 
   function hasPlayerVoted(playerId) {
@@ -933,8 +1074,9 @@
     const isVisible = !gameState.spectatorMode && player.id === gameState.selectedPlayerId;
     const isActive = player.id === gameState.selectedPlayerId;
     const isStoryteller = player.id === gameState.currentStorytellerPlayerId;
+    const hasPlayedCard = hasPlayerPlayedCard(player.id);
     return `
-      <article class="player-hand ${zoneClass} ${isActive ? "active" : ""} ${isStoryteller ? "storyteller" : ""}">
+      <article class="player-hand ${zoneClass} ${isActive ? "active" : ""} ${isStoryteller ? "storyteller" : ""} ${hasPlayedCard ? "has-played-hand" : ""}">
         <div class="hand-header">
           <h2 class="hand-title">
             ${escapeHtml(player.name)}
@@ -973,18 +1115,36 @@
     if (!gameState.playedCards.length) {
       return "";
     }
+    const playerCountClass = `played-count-${gameState.players.length}`;
     return `
-      <div class="played-grid ${shuffleAnimating ? "shuffling" : ""}">
+      <div class="played-grid ${playerCountClass} ${shuffleAnimating ? "shuffling" : ""}">
         ${gameState.playedCards.map((card) => `
           <div class="played-card-wrap ${gameState.roundResolved && card.ownerPlayerId === gameState.currentStorytellerPlayerId ? "storyteller-card" : ""}">
             <div class="played-card-stack">
               ${renderCard(card, isPlayedCardVisible(card), false)}
+              ${renderPlayedCardOwnerLabel(card)}
               ${renderVoteMarkers(card.id)}
               ${card.ownerPlayerId === gameState.selectedPlayerId ? `<button class="reclaim-card" data-action="reclaim-card" data-card-id="${card.id}" title="Kartı geri al" aria-label="Kartı geri al">↩</button>` : ""}
             </div>
           </div>
         `).join("")}
       </div>
+    `;
+  }
+
+  function renderPlayedCardOwnerLabel(card) {
+    if (!gameState.roundResolved) return "";
+    const owner = getPlayer(card.ownerPlayerId);
+    if (!owner) return "";
+    const isStorytellerCard = owner.id === gameState.currentStorytellerPlayerId;
+    const label = isStorytellerCard ? `Anlatıcı: ${owner.name}` : owner.name;
+    const background = isStorytellerCard ? "#ffd36a" : "rgba(93, 99, 97, 0.92)";
+    const color = isStorytellerCard ? "#17231f" : "#fff8df";
+    return `
+      <span
+        class="played-owner-label ${isStorytellerCard ? "storyteller-label" : ""}"
+        style="background:${background};color:${color}"
+      >${escapeHtml(label)}</span>
     `;
   }
 
@@ -1005,6 +1165,7 @@
   }
 
   function renderVoteMarkers(cardId) {
+    const tokenMap = getPlayerTokenMap(gameState.players);
     const visibleVotes = gameState.roundResolved
       ? gameState.votes
       : gameState.votingMode && gameState.selectedVoterPlayerId
@@ -1016,7 +1177,7 @@
       <div class="vote-markers">
         ${votes.map((vote) => {
           const player = getPlayer(vote.voterPlayerId);
-          return player ? renderPawn(player) : "";
+          return player ? renderPawn(player, tokenMap) : "";
         }).join("")}
       </div>
     `;
@@ -1034,42 +1195,44 @@
 
   function renderScore() {
     if (!gameState) return renderHome();
+    const tokenMap = getPlayerTokenMap(gameState.players);
     return `
       <main class="screen score-screen">
         <section class="score-layout">
-          <div class="score-map-wrap">
-            <div class="score-map" aria-label="Skor haritası">
-              ${gameState.players.map(renderScorePawn).join("")}
-            </div>
-          </div>
           <aside class="score-list">
             <div class="score-panel-header">
               <h2>Oyuncular</h2>
               <button class="btn small" data-action="go-game">Oyuna Dön</button>
             </div>
-            ${gameState.players.map(renderScoreRow).join("")}
+            ${gameState.players.map((player) => renderScoreRow(player, tokenMap)).join("")}
           </aside>
+          <div class="score-map-wrap">
+            <div class="score-map" aria-label="Skor haritası">
+            ${gameState.players.map((player) => renderScorePawn(player, tokenMap)).join("")}
+            </div>
+          </div>
         </section>
       </main>
     `;
   }
 
-  function renderScorePawn(player) {
+  function renderScorePawn(player, tokenMap = null) {
     const position = scorePositions.find((item) => item.score === clamp(player.score, 0, settings.maxScore)) || scorePositions[0];
-    const offset = (player.id - 2.5) * 8;
+    const offsetIndex = player.id - (gameState.players.length + 1) / 2;
+    const offset = offsetIndex * 6;
     return `
       <span
         class="score-pawn"
         style="left:calc(${position.x}% + ${offset}px);top:calc(${position.y}% + ${offset}px);background:${colorWithAlpha(player.color, 0.58)}"
         title="${escapeHtml(player.name)}: ${player.score}"
-      >${escapeHtml(getPlayerToken(player))}</span>
+      >${escapeHtml(getPlayerToken(player, tokenMap))}</span>
     `;
   }
 
-  function renderScoreRow(player) {
+  function renderScoreRow(player, tokenMap = null) {
     return `
       <div class="score-row compact">
-        <div class="score-name">${renderPawn(player)} ${escapeHtml(player.name)}</div>
+        <div class="score-name">${renderPawn(player, tokenMap)} ${escapeHtml(player.name)}</div>
         <div class="score-actions compact">
           <button class="btn icon-btn" data-action="score-delta" data-player-id="${player.id}" data-delta="-1">-</button>
           <span class="score-value-compact">${player.score}</span>
@@ -1079,8 +1242,8 @@
     `;
   }
 
-  function renderPawn(player) {
-    return `<span class="pawn" style="background:${player.color}">${escapeHtml(getPlayerToken(player))}</span>`;
+  function renderPawn(player, tokenMap = null) {
+    return `<span class="pawn" style="background:${player.color}">${escapeHtml(getPlayerToken(player, tokenMap))}</span>`;
   }
 
   function renderModal() {
@@ -1101,7 +1264,7 @@
           <h2>Ayarlar</h2>
           <label class="settings-row">
             <span>Oyuncu sayısı</span>
-            <input class="number-input" value="4" disabled>
+            <input class="number-input" value="${settings.playerCount}" disabled>
           </label>
           <label class="settings-row">
             <span>Oyuncu başına kart</span>
@@ -1124,6 +1287,7 @@
   }
 
   function renderRoundScoreModal() {
+    const tokenMap = getPlayerTokenMap(gameState.players);
     return `
       <div class="modal-backdrop">
         <section class="modal-card">
@@ -1131,7 +1295,7 @@
           <div class="round-score-grid">
             ${gameState.players.map((player) => `
               <label class="round-score-line">
-                <span>${renderPawn(player)} ${escapeHtml(player.name)}</span>
+                <span>${renderPawn(player, tokenMap)} ${escapeHtml(player.name)}</span>
                 <input class="number-input" type="number" min="-10" max="10" value="${modal.deltas[player.id] || 0}" data-action="round-delta" data-player-id="${player.id}">
               </label>
             `).join("")}
@@ -1146,12 +1310,26 @@
   }
 
   function renderGameFinishedModal() {
-    const winner = getPlayer(modal.winnerId);
+    const rankings = getPlayerRankings();
+    const leaders = rankings.filter((item) => item.rank === 1);
+    const hasTie = leaders.length > 1;
     return `
       <div class="modal-backdrop">
         <section class="modal-card">
-          <h2>Oyun Bitti</h2>
-          <p><strong>${escapeHtml(winner?.name || "Kazanan")}</strong> ${settings.maxScore} puana ulaştı.</p>
+          <h2>${hasTie ? "Oyun Bitti - Beraberlik" : "Oyun Bitti"}</h2>
+          <p>${
+            hasTie
+              ? `<strong>${leaders.map((item) => escapeHtml(item.player.name)).join(" ve ")}</strong> ${leaders[0]?.score || settings.maxScore} puanla berabere kaldı.`
+              : `<strong>${escapeHtml(leaders[0]?.player.name || "Kazanan")}</strong> ${leaders[0]?.score || settings.maxScore} puanla kazandı.`
+          }</p>
+          <ol class="ranking-list">
+            ${rankings.map((item) => `
+              <li>
+                <span>${item.rank}. ${escapeHtml(item.player.name)}</span>
+                <strong>${item.score} puan</strong>
+              </li>
+            `).join("")}
+          </ol>
           <div class="modal-actions">
             <button class="btn primary" data-action="new-game">Yeni Oyun Başlat</button>
             <button class="btn" data-action="correct-score">Düzelt</button>
@@ -1160,6 +1338,17 @@
         </section>
       </div>
     `;
+  }
+
+  function getPlayerRankings() {
+    const sorted = [...(gameState?.players || [])].sort((a, b) => b.score - a.score || a.id - b.id);
+    let previousScore = null;
+    let currentRank = 0;
+    return sorted.map((player) => {
+      if (player.score !== previousScore) currentRank += 1;
+      previousScore = player.score;
+      return { player, score: player.score, rank: currentRank };
+    });
   }
 
   function renderConfirmExitModal() {
@@ -1241,7 +1430,9 @@
 
     if (action === "new-game") {
       clearSavedGame();
-      setupDraft = createSetupDraft();
+      settings.playerCount = defaultSettings.playerCount;
+      saveSettings();
+      setupDraft = createSetupDraft(settings.playerCount);
       modal = null;
       navigate("setup");
     }
@@ -1253,12 +1444,12 @@
         return;
       }
       if (!saved || !saved.isGameStarted) {
-        showToast("Kayıtlı oyun bulunamadı.");
+        render();
         return;
       }
       gameState = saved;
       saveGame();
-      modal = gameState.isGameFinished ? { type: "gameFinished", winnerId: gameState.players.find((p) => p.score >= settings.maxScore)?.id } : null;
+      modal = gameState.isGameFinished ? { type: "gameFinished" } : null;
       centerCardsRevealed = false;
       navigate("game");
     }
@@ -1323,6 +1514,7 @@
     }
 
     if (action === "go-score") {
+      if (gameState?.roundResolved) return;
       modal = null;
       navigate("score");
     }
@@ -1333,6 +1525,10 @@
         player.id === playerId ? { ...player, color: target.dataset.color } : player
       );
       render();
+    }
+
+    if (action === "setup-player-count") {
+      updateSetupPlayerCount(Number(target.dataset.count));
     }
 
     if (action === "start-game") {
