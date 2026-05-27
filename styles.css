@@ -23,15 +23,18 @@
 
 html,
 body {
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
   background: #071114;
   color: var(--ink);
-  min-height: 100svh;
-  overflow-x: hidden;
+  min-height: 100%;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 button,
@@ -51,11 +54,15 @@ button:disabled {
 }
 
 .app-shell {
-  min-height: 100svh;
+  width: 100%;
+  height: 100svh;
+  overflow: hidden;
 }
 
 .screen {
-  min-height: 100svh;
+  width: 100%;
+  height: 100svh;
+  overflow: hidden;
   padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
 }
 
@@ -125,6 +132,11 @@ button:disabled {
     linear-gradient(rgba(5, 15, 18, 0.78), rgba(5, 15, 18, 0.86)),
     url("2-3 Giriş Ekranı.png") center / cover no-repeat;
   overflow: auto;
+}
+
+.card-gallery-screen,
+.modal-card {
+  overscroll-behavior: contain;
 }
 
 .card-gallery-shell {
@@ -238,8 +250,8 @@ button:disabled {
 }
 
 .btn.small {
-  min-height: 38px;
-  padding: 8px 12px;
+  min-height: 34px;
+  padding: 7px 11px;
   font-size: 0.92rem;
 }
 
@@ -414,20 +426,24 @@ button:disabled {
 .game-screen {
   background: #111719;
   display: grid;
-  align-items: start;
+  align-items: stretch;
 }
 
 .game-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
+  height: 100%;
   width: min(calc(100vw - 20px), 760px);
   margin: 0 auto;
+  min-height: 0;
 }
 
 .map-board {
   position: relative;
-  width: min(100%, calc((100svh - 104px) * var(--scene-ratio)));
+  width: min(100%, calc(100% * var(--scene-ratio)));
+  max-height: 100%;
   max-width: 760px;
   aspect-ratio: var(--scene-ratio);
   margin: 0 auto;
@@ -982,9 +998,9 @@ button:disabled {
   z-index: 5;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 178px;
-  gap: 12px;
+  gap: 8px;
   align-items: stretch;
-  padding: 10px;
+  padding: 8px;
   background: rgba(13, 20, 22, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -994,7 +1010,7 @@ button:disabled {
 .game-primary-controls {
   display: grid;
   align-content: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1090,7 +1106,7 @@ button:disabled {
 }
 
 .mode-btn {
-  min-height: 44px;
+  min-height: 40px;
   border: 2px solid rgba(255, 248, 223, 0.56);
   background: rgba(255, 248, 223, 0.9);
   color: #17231f;
@@ -1111,7 +1127,7 @@ button:disabled {
 
 .reveal-btn {
   width: 100%;
-  min-height: 44px;
+  min-height: 40px;
 }
 
 .round-resolved .mode-control .mode-btn,
@@ -1131,7 +1147,7 @@ button:disabled {
 
 .icon-control {
   width: 44px;
-  min-height: 44px;
+  min-height: 40px;
   padding: 0;
   display: grid;
   place-items: center;
@@ -1175,15 +1191,20 @@ button:disabled {
 
 .score-screen {
   background: #071114;
+  display: grid;
+  align-items: stretch;
 }
 
 .score-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  height: 100%;
   width: min(calc(100vw - 20px), 760px);
   max-width: 760px;
   margin: 0 auto;
+  min-height: 0;
 }
 
 .score-map-wrap,
@@ -1196,6 +1217,9 @@ button:disabled {
 }
 
 .score-map-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 0;
   background: transparent;
   border: 0;
   padding: 0;
@@ -1204,7 +1228,8 @@ button:disabled {
 
 .score-map {
   position: relative;
-  width: min(100%, calc((100svh - 164px) * var(--score-ratio)));
+  width: min(100%, calc(100% * var(--score-ratio)));
+  max-height: 100%;
   max-width: 760px;
   aspect-ratio: var(--score-ratio);
   margin: 0 auto;
@@ -1236,7 +1261,7 @@ button:disabled {
 .score-list h2 {
   margin: 0;
   color: #fff8df;
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
 .score-panel-header {
@@ -1252,8 +1277,8 @@ button:disabled {
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: center;
-  padding: 6px 8px;
-  margin-bottom: 6px;
+  padding: 4px 7px;
+  margin-bottom: 4px;
   background: rgba(12, 35, 38, 0.74);
   border-color: rgba(238, 214, 139, 0.18);
 }
@@ -1308,6 +1333,17 @@ button:disabled {
   color: #fff8df;
   font-weight: 900;
   font-size: 1rem;
+}
+
+.score-list .pawn {
+  width: 20px;
+  height: 20px;
+  font-size: 0.72rem;
+}
+
+.score-list .icon-btn {
+  width: 34px;
+  min-height: 34px;
 }
 
 .modal-backdrop {
@@ -1426,8 +1462,7 @@ button:disabled {
   }
 
   .setup-grid,
-  .player-hands-grid,
-  .score-layout {
+  .player-hands-grid {
     grid-template-columns: 1fr;
   }
 
