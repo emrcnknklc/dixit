@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   "use strict";
 
   const STORAGE_KEY = "dixitLocalGameState";
@@ -10,6 +10,9 @@
   const MIN_PLAYER_COUNT = 3;
   const MAX_PLAYER_COUNT = 6;
   const PLAYER_COUNT_OPTIONS = [3, 4, 5, 6];
+  const PLAYER_PAWN_COLOR = "#b9bdb8";
+  const GAME_STAGE_WIDTH = 1024;
+  const GAME_STAGE_HEIGHT = 1536;
 
   const defaultSettings = {
     playerCount: 4,
@@ -19,8 +22,7 @@
     timerEnabled: false
   };
 
-  const colorOptions = ["#c84848", "#2f6f73", "#4f63a6", "#9b6a2f", "#d39b36", "#7b4fa3", "#2f8f5b"];
-  const playerColors = colorOptions.slice(0, MAX_PLAYER_COUNT);
+  const playerColors = Array.from({ length: MAX_PLAYER_COUNT }, () => PLAYER_PAWN_COLOR);
 
   const scorePositions = [
     { score: 0, x: 60.7, y: 70.1 },
@@ -179,7 +181,7 @@
       return {
       id: index + 1,
         name: previous?.name || "",
-        color: previous?.color || playerColors[index] || colorOptions[index % colorOptions.length]
+        color: PLAYER_PAWN_COLOR
       };
     });
   }
@@ -198,7 +200,7 @@
     const players = playersDraft.map((draft, index) => ({
       id: index + 1,
       name: draft.name.trim() || `${index + 1} Player`,
-      color: draft.color || playerColors[index] || colorOptions[index % colorOptions.length],
+      color: PLAYER_PAWN_COLOR,
       score: 0,
       handCards: dealCards(index + 1, settings.cardsPerPlayer, deck, false, new Set())
     }));
@@ -871,6 +873,25 @@
     if (currentView === "score") app.innerHTML = renderScore();
     if (currentView === "cards") app.innerHTML = renderCardGallery();
     if (modal) app.insertAdjacentHTML("beforeend", renderModal());
+    updateGameStageScale();
+  }
+
+  function updateGameStageScale() {
+    const layout = document.querySelector(".game-layout");
+    const shell = document.querySelector(".map-stage-shell");
+    const controls = document.querySelector(".game-controls");
+    const layoutRect = layout?.getBoundingClientRect();
+    const controlsRect = controls?.getBoundingClientRect();
+    const viewport = globalThis.visualViewport;
+    const width = layoutRect?.width || shell?.getBoundingClientRect()?.width || ((viewport?.width || globalThis.innerWidth || GAME_STAGE_WIDTH) - 20);
+    const screenHeight = viewport?.height || globalThis.innerHeight || GAME_STAGE_HEIGHT;
+    const gap = layout ? Number.parseFloat(getComputedStyle(layout).gap) || 0 : 8;
+    const controlsHeight = controlsRect?.height || 0;
+    const height = Math.max(120, screenHeight - controlsHeight - gap);
+    const scale = Math.max(0.1, Math.min(width / GAME_STAGE_WIDTH, height / GAME_STAGE_HEIGHT));
+    const renderHeight = Math.max(1, GAME_STAGE_HEIGHT * scale);
+    document.documentElement.style.setProperty("--game-stage-scale", String(scale));
+    document.documentElement.style.setProperty("--game-stage-render-height", `${renderHeight}px`);
   }
 
   function renderHome() {
@@ -954,25 +975,7 @@
           Oyuncu ${player.id}
           <input class="text-input" data-action="setup-name" data-player-id="${player.id}" value="${escapeHtml(player.name)}" placeholder="${player.id} Player">
         </label>
-        ${renderColorChoices(player, "setup-color")}
       </article>
-    `;
-  }
-
-  function renderColorChoices(player, action) {
-    return `
-      <div class="color-choice-row" aria-label="Piyon rengi">
-        ${colorOptions.map((color) => `
-          <button
-            class="color-choice ${player.color === color ? "selected" : ""}"
-            style="background:${color}"
-            data-action="${action}"
-            data-player-id="${player.id}"
-            data-color="${color}"
-            title="Piyon rengi"
-          ></button>
-        `).join("")}
-      </div>
     `;
   }
 
@@ -986,19 +989,21 @@
     return `
       <main class="screen game-screen ${gameState.roundResolved ? "round-resolved" : ""}">
         <section class="game-layout">
-          <section class="map-board" aria-label="Ana oyun haritası">
-            <div class="deck-count" aria-label="Oyunda kalan kart sayısı">${gameState.deck.length}</div>
-            ${selectedPlayer ? renderPlayerHand(selectedPlayer, "player-zone-4") : ""}
-            ${selectedPlayer ? `<button class="hand-play-button btn small" data-action="play-card" ${!selectedPlayableCard || selectedPlayerHasPlayed || gameState.spectatorMode ? "disabled" : ""}>Kartı Oyna</button>` : ""}
-            ${renderVotingDock()}
-            ${renderShuffleButton()}
-            ${gameState.roundScoreSummary ? renderRoundSummary() : ""}
-            <div class="played-slot played-count-${gameState.players.length}">
-              ${renderPlayedCards()}
-            </div>
-          </section>
+          <div class="map-stage-shell">
+            <section class="map-board" aria-label="Ana oyun haritası">
+              <div class="deck-count" aria-label="Oyunda kalan kart sayısı">${gameState.deck.length}</div>
+              ${selectedPlayer ? renderPlayerHand(selectedPlayer, "player-zone-4") : ""}
+              ${selectedPlayer ? `<button class="hand-play-button btn small" data-action="play-card" ${!selectedPlayableCard || selectedPlayerHasPlayed || gameState.spectatorMode ? "disabled" : ""}>Kartı Oyna</button>` : ""}
+              ${renderVotingDock()}
+              ${renderShuffleButton()}
+              ${gameState.roundScoreSummary ? renderRoundSummary() : ""}
+              <div class="played-slot played-count-${gameState.players.length}">
+                ${renderPlayedCards()}
+              </div>
+            </section>
+          </div>
 
-          <nav class="game-controls">
+          <nav class="game-controls ${gameState.votingMode ? "voting-active" : ""}">
             <div class="game-primary-controls">
               <div class="selector-bar">
                 <div class="player-selector" aria-label="Oyuncu seçici">
@@ -1020,11 +1025,11 @@
             <div class="mode-control">
               <div class="mode-row">
                 <button class="btn mode-btn ${gameState.spectatorMode ? "active" : ""}" data-action="toggle-spectator-button" ${gameState.roundResolved ? "disabled" : ""}>Kilitle</button>
-                <button class="btn icon-control" data-action="open-player-edit" title="Düzenleme" aria-label="Düzenleme">⚙</button>
+                <button class="btn small reveal-btn ${centerCardsRevealed ? "active" : ""}" data-action="toggle-center" ${gameState.spectatorMode && gameState.playedCards.length === gameState.players.length ? "" : "disabled"}>${centerCardsRevealed ? "Kartları Kapat" : "Kartları Aç"}</button>
               </div>
               <div class="mode-row">
-                <button class="btn small reveal-btn ${centerCardsRevealed ? "active" : ""}" data-action="toggle-center" ${gameState.spectatorMode && gameState.playedCards.length === gameState.players.length ? "" : "disabled"}>${centerCardsRevealed ? "Kartları Kapat" : "Kartları Aç"}</button>
-                <button class="btn icon-control" data-action="open-exit-confirm" title="Ana Menü" aria-label="Ana Menü">⌂</button>
+                <button class="btn icon-control" data-action="open-player-edit" title="Düzenleme" aria-label="Düzenleme">⚙</button>
+                <button class="btn icon-control" data-action="open-exit-confirm" title="Ana Menü" aria-label="Ana Menü"><img src="assets/ui/home.svg" alt="" aria-hidden="true"></button>
               </div>
             </div>
           </nav>
@@ -1125,7 +1130,7 @@
               ${renderCard(card, isPlayedCardVisible(card), false)}
               ${renderPlayedCardOwnerLabel(card)}
               ${renderVoteMarkers(card.id)}
-              ${card.ownerPlayerId === gameState.selectedPlayerId ? `<button class="reclaim-card" data-action="reclaim-card" data-card-id="${card.id}" title="Kartı geri al" aria-label="Kartı geri al">↩</button>` : ""}
+              ${card.ownerPlayerId === gameState.selectedPlayerId ? `<button class="reclaim-card" data-action="reclaim-card" data-card-id="${card.id}" title="Kartı geri al" aria-label="Kartı geri al"><img src="assets/ui/reclaim.svg" alt="" aria-hidden="true"></button>` : ""}
             </div>
           </div>
         `).join("")}
@@ -1207,11 +1212,6 @@
             </div>
             ${gameState.players.map((player) => renderScoreRow(player, tokenMap)).join("")}
           </aside>
-          <div class="score-map-wrap">
-            <div class="score-map" aria-label="Skor haritası">
-            ${gameState.players.map((player) => renderScorePawn(player, tokenMap)).join("")}
-            </div>
-          </div>
         </section>
       </main>
     `;
@@ -1224,7 +1224,7 @@
     return `
       <span
         class="score-pawn"
-        style="left:calc(${position.x}% + ${offset}px);top:calc(${position.y}% + ${offset}px);background:${colorWithAlpha(player.color, 0.58)}"
+        style="left:calc(${position.x}% + ${offset}px);top:calc(${position.y}% + ${offset}px);background:${colorWithAlpha(PLAYER_PAWN_COLOR, 0.34)}"
         title="${escapeHtml(player.name)}: ${player.score}"
       >${escapeHtml(getPlayerToken(player, tokenMap))}</span>
     `;
@@ -1244,7 +1244,7 @@
   }
 
   function renderPawn(player, tokenMap = null) {
-    return `<span class="pawn" style="background:${player.color}">${escapeHtml(getPlayerToken(player, tokenMap))}</span>`;
+    return `<span class="pawn" style="background:${colorWithAlpha(PLAYER_PAWN_COLOR, 0.68)}">${escapeHtml(getPlayerToken(player, tokenMap))}</span>`;
   }
 
   function renderModal() {
@@ -1390,7 +1390,6 @@
           Oyuncu ${player.id}
           <input class="text-input" data-action="edit-player-name" data-player-id="${player.id}" value="${escapeHtml(player.name)}" placeholder="${player.id} Player">
         </label>
-        ${renderColorChoices(player, "edit-player-color")}
       </article>
     `;
   }
@@ -1520,14 +1519,6 @@
       navigate("score");
     }
 
-    if (action === "setup-color") {
-      const playerId = Number(target.dataset.playerId);
-      setupDraft = setupDraft.map((player) =>
-        player.id === playerId ? { ...player, color: target.dataset.color } : player
-      );
-      render();
-    }
-
     if (action === "setup-player-count") {
       updateSetupPlayerCount(Number(target.dataset.count));
     }
@@ -1567,9 +1558,6 @@
       updateScore(Number(target.dataset.playerId), Number(target.dataset.delta));
     }
 
-    if (action === "edit-player-color") {
-      updatePlayerProfile(Number(target.dataset.playerId), { color: target.dataset.color });
-    }
   });
 
   app.addEventListener("input", (event) => {
@@ -1618,6 +1606,10 @@
       saveSettings();
     }
   });
+
+  globalThis.addEventListener?.("resize", updateGameStageScale);
+  globalThis.visualViewport?.addEventListener?.("resize", updateGameStageScale);
+  globalThis.visualViewport?.addEventListener?.("scroll", updateGameStageScale);
 
   render();
 })();

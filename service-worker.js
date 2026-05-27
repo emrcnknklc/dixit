@@ -1,4 +1,4 @@
-const CACHE_NAME = "emredxt-shell-v1";
+const CACHE_NAME = "emredxt-shell-v2";
 const SHELL_ASSETS = [
   "./",
   "./index.html",
@@ -10,7 +10,9 @@ const SHELL_ASSETS = [
   "./2-3 Skor .png",
   "./assets/cards/card-back.webp",
   "./assets/icons/emredxt-icon-192.png",
-  "./assets/icons/emredxt-icon-512.png"
+  "./assets/icons/emredxt-icon-512.png",
+  "./assets/ui/home.svg",
+  "./assets/ui/reclaim.svg"
 ];
 
 self.addEventListener("install", (event) => {
